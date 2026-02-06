@@ -83,9 +83,10 @@ jobs:
 
           sed -i 's/🕎/🇮🇱/g' "$FILE"
           sed -i 's/🇵🇸/🇦🇪/g' "$FILE"
+          sed -i 's/🇬🇧/🇺🇸/g' "$FILE"
 
           echo "Patched:"
-          grep -n "🇮🇱\|🇦🇪" "$FILE"
+          grep -n "🇮🇱\|🇦🇪\|🇺🇸" "$FILE"
 
       - name: Move source into workspace
         if: steps.check.outputs.should_build == 'true'
