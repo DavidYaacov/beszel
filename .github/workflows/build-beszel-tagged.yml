@@ -1,4 +1,4 @@
-name: Build patched Beszel image (beszel only)
+name: Build patched Beszel image from latest upstream tag
 
 on:
   workflow_dispatch:
@@ -8,67 +8,69 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       packages: write
 
     steps:
-      # 1️⃣ Clone upstream repo instead of checkout
-      - name: Clone upstream Beszel
-        run: |
-          git clone https://github.com/henrygd/beszel.git src
-          cd src
-          echo "UPSTREAM_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-      # 1.5️⃣ Get upstream version and decide whether to build
-      - name: Resolve upstream version
+      - name: Clone upstream and checkout latest tag
         id: upstream
         run: |
           set -e
+          git clone https://github.com/henrygd/beszel.git src
           cd src
-          TAG=$(git describe --tags --abbrev=0)
+          git fetch --tags --force
+          TAG=$(git tag --sort=-v:refname | head -n 1)
           if [ -z "$TAG" ]; then
             echo "No upstream tag found"
             exit 1
           fi
+          git checkout "tags/$TAG"
           VERSION="${TAG#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "major=$MAJOR" >> $GITHUB_OUTPUT
-          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+          echo "Upstream tag: $TAG"
 
-      - name: Check if version already published
+      - name: Check if image tag already exists in GHCR
         id: check
         env:
           OWNER: ${{ github.repository_owner }}
           TAG: ${{ steps.upstream.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${OWNER}/beszel:pull&service=ghcr.io" | python -c "import sys, json; print(json.load(sys.stdin).get('token',''))")
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "Failed to get GHCR token"
-            exit 1
-          fi
-          RESP=$(curl -s -H "Authorization: Bearer $TOKEN" -w "\n%{http_code}" "https://ghcr.io/v2/${OWNER}/beszel/tags/list")
-          BODY=$(echo "$RESP" | sed '$d')
-          CODE=$(echo "$RESP" | tail -n 1)
-          if [ "$CODE" = "404" ]; then
-            echo "No existing package found. Building first release."
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          TAGS=$(echo "$BODY" | python -c "import sys, json; print('\n'.join(json.load(sys.stdin).get('tags', []) or []))")
-          if echo "$TAGS" | grep -qx "$TAG"; then
-            echo "Upstream tag $TAG already published. Skipping build."
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "New upstream tag $TAG found. Building."
-            echo "should_build=true" >> $GITHUB_OUTPUT
+          OWNER_TYPE=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/users/${OWNER}" | python -c "import sys, json; print((json.load(sys.stdin).get('type') or '').lower())")
+          SCOPE=users
+          if [ "$OWNER_TYPE" = "organization" ]; then
+            SCOPE=orgs
           fi
 
-      # 2️⃣ Apply emoji patch
+          RESP=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -w "\n%{http_code}" "https://api.github.com/${SCOPE}/${OWNER}/packages/container/beszel/versions?per_page=100")
+          BODY=$(echo "$RESP" | sed '$d')
+          CODE=$(echo "$RESP" | tail -n 1)
+
+          if [ "$CODE" = "404" ]; then
+            echo "No package found yet, first build will run."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$CODE" != "200" ]; then
+            echo "Package lookup failed with HTTP $CODE"
+            echo "$BODY"
+            exit 1
+          fi
+
+          TAGS=$(echo "$BODY" | python -c "import sys, json; data=json.load(sys.stdin); out=[]; [out.extend((v.get('metadata',{}).get('container',{}).get('tags') or [])) for v in data]; print('\n'.join(out))")
+          if echo "$TAGS" | grep -qx "$TAG"; then
+            echo "Tag $TAG already exists, skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG not found, build will run."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Patch languages.ts
         if: steps.check.outputs.should_build == 'true'
         run: |
@@ -85,12 +87,10 @@ jobs:
           echo "Patched:"
           grep -n "🇮🇱\|🇦🇪" "$FILE"
 
-      # 3️⃣ Set working directory to cloned repo
-      - name: Move into source
+      - name: Move source into workspace
         if: steps.check.outputs.should_build == 'true'
         run: mv src/* ./
 
-      # 4️⃣ Same build steps as upstream
       - name: Set up bun
         if: steps.check.outputs.should_build == 'true'
         uses: oven-sh/setup-bun@v2
@@ -118,23 +118,19 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/beszel
           tags: |
-            type=raw,value=edge
             type=raw,value=latest
             type=raw,value=${{ steps.upstream.outputs.tag }}
             type=raw,value=${{ steps.upstream.outputs.major }}.${{ steps.upstream.outputs.minor }}
             type=raw,value=${{ steps.upstream.outputs.major }}
-            type=raw,value={{sha}}
 
-      # 5️⃣ Login ONLY to GHCR
       - name: Login to GHCR
         if: github.event_name != 'pull_request' && steps.check.outputs.should_build == 'true'
         uses: docker/login-action@v3
         with:
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ghcr.io
 
-      # 6️⃣ Build & push (same logic)
       - name: Build and push Docker image
         if: steps.check.outputs.should_build == 'true'
         uses: docker/build-push-action@v5
