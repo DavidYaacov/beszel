@@ -46,12 +46,12 @@ jobs:
           TAG: ${{ steps.upstream.outputs.tag }}
         run: |
           set -e
-          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${OWNER}/beszel:pull&service=ghcr.io" | jq -r .token)
+          TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${OWNER}/beszel:pull&service=ghcr.io" | python -c "import sys, json; print(json.load(sys.stdin).get('token',''))")
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "Failed to get GHCR token"
             exit 1
           fi
-          TAGS=$(curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${OWNER}/beszel/tags/list" | jq -r '.tags[]?')
+          TAGS=$(curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${OWNER}/beszel/tags/list" | python -c "import sys, json; print('\n'.join(json.load(sys.stdin).get('tags', []) or []))")
           if echo "$TAGS" | grep -qx "$TAG"; then
             echo "Upstream tag $TAG already published. Skipping build."
             echo "should_build=false" >> $GITHUB_OUTPUT
