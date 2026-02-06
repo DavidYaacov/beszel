@@ -51,7 +51,15 @@ jobs:
             echo "Failed to get GHCR token"
             exit 1
           fi
-          TAGS=$(curl -s -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/${OWNER}/beszel/tags/list" | python -c "import sys, json; print('\n'.join(json.load(sys.stdin).get('tags', []) or []))")
+          RESP=$(curl -s -H "Authorization: Bearer $TOKEN" -w "\n%{http_code}" "https://ghcr.io/v2/${OWNER}/beszel/tags/list")
+          BODY=$(echo "$RESP" | sed '$d')
+          CODE=$(echo "$RESP" | tail -n 1)
+          if [ "$CODE" = "404" ]; then
+            echo "No existing package found. Building first release."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          TAGS=$(echo "$BODY" | python -c "import sys, json; print('\n'.join(json.load(sys.stdin).get('tags', []) or []))")
           if echo "$TAGS" | grep -qx "$TAG"; then
             echo "Upstream tag $TAG already published. Skipping build."
             echo "should_build=false" >> $GITHUB_OUTPUT
