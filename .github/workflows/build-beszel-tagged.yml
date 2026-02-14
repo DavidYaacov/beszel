@@ -82,7 +82,7 @@ jobs:
           fi
 
           sed -i 's/🕎/🇮🇱/g' "$FILE"
-          sed -i 's/🇵🇸/🇦🇪/g' "$FILE"
+          sed -i 's/🇵🇸/🕋/g' "$FILE"
           sed -i 's/🇬🇧/🇺🇸/g' "$FILE"
 
           echo "Patched:"
