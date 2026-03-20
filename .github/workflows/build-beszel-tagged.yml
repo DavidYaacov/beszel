@@ -119,10 +119,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/beszel
           tags: |
-            type=raw,value=latest
             type=raw,value=${{ steps.upstream.outputs.tag }}
-            type=raw,value=${{ steps.upstream.outputs.major }}.${{ steps.upstream.outputs.minor }}
-            type=raw,value=${{ steps.upstream.outputs.major }}
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request' && steps.check.outputs.should_build == 'true'
