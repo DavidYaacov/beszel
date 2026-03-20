@@ -81,7 +81,7 @@ jobs:
             exit 1
           fi
 
-          sed -i 's/🕎/🇮🇱/g' "$FILE"
+          sed -i 's|\["he", "עברית", ""\],|["he", "עברית", "🇮🇱"],|g' "$FILE"
           sed -i 's/🇵🇸/🕋/g' "$FILE"
           sed -i 's/🇬🇧/🇺🇸/g' "$FILE"
 
